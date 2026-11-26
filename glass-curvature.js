@@ -156,35 +156,59 @@ function applePillPath(width, height) {
 }
 
 
-// Flowform production contract: width adapts, pill height never does.
+// Revision 2.0: two mathematical families, four immutable component presets.
 const PILL_HEIGHT = 36;
 const PILL_MIN_WIDTH = PILL_HEIGHT * EXTENT;
-function fixedPillPath(width) {
-  if (!Number.isFinite(width) || width < PILL_MIN_WIDTH)
-    throw new RangeError("Pill is too narrow for its uncompressed end caps");
-  return applePillPath(width, PILL_HEIGHT);
+const GLASS_PRESETS = Object.freeze({
+  toolbar: Object.freeze({family:'pill', height:36, extent:36*EXTENT/2}),
+  actionButton: Object.freeze({family:'pill', height:28, extent:28*EXTENT/2}),
+  menu: Object.freeze({family:'roundedRectangle', extent:MENU_CORNER.extent}),
+  dialog: Object.freeze({family:'roundedRectangle', extent:39.774})
+});
+// Legacy "pill" refers only to the toolbar class.
+function getGlassPreset(kind) {
+  const key = kind === 'pill' ? 'toolbar' : kind;
+  if (!Object.prototype.hasOwnProperty.call(GLASS_PRESETS,key))
+    throw new RangeError('Unknown glass component: '+kind);
+  return GLASS_PRESETS[key];
 }
-// Observe an isolated material layer, in horizontal writing mode.
+function glassPath(kind, width, height) {
+  const p = getGlassPreset(kind);
+  if (!Number.isFinite(width) || width <= 0) throw new RangeError('Invalid width');
+  if (p.family === 'pill') {
+    if (height !== undefined && (!Number.isFinite(height) || Math.abs(height-p.height)>0.01))
+      throw new RangeError('Invalid fixed-height pill dimensions');
+    if (width < 2*p.extent) throw new RangeError('Pill too narrow for full end caps');
+    return applePillPath(width,p.height);
+  }
+  if (!Number.isFinite(height) || Math.min(width,height) < 2*p.extent)
+    throw new RangeError('Rectangle too small for full corners');
+  return menuPath(width,height,p.extent);
+}
+function fixedPillPath(width) { return glassPath('toolbar',width); }
+function actionButtonPath(width) { return glassPath('actionButton',width); }
+function dialogPath(width,height) { return glassPath('dialog',width,height); }
+// Observe an isolated, horizontal-writing-mode material layer. Invalid geometry
+// is hidden by an empty clip rather than falling back to a rectangular vessel.
 function attachGlassShape(element, kind) {
-  if (!['menu','pill'].includes(kind)) throw new RangeError('Unknown shape');
+  getGlassPreset(kind);
   const update = (entries) => {
     const box = entries?.[0]?.borderBoxSize;
     const size = Array.isArray(box) ? box[0] : box;
     const w = size?.inlineSize ?? element.offsetWidth;
     const h = size?.blockSize ?? element.offsetHeight;
-    if (w <= 0 || h <= 0) return;
-    if (kind === 'pill' && (Math.abs(h-PILL_HEIGHT)>0.01 || w<PILL_MIN_WIDTH)) {
-      element.dataset.geometryError = 'Invalid fixed-height pill dimensions';
-      element.style.clipPath = '';
-      return;
+    try {
+      const d = glassPath(kind,w,h);
+      delete element.dataset.geometryError;
+      element.style.clipPath = `path("${d}")`;
+    } catch(error) {
+      element.dataset.geometryError = error.message;
+      element.style.clipPath = 'inset(50%)';
     }
-    delete element.dataset.geometryError;
-    element.style.clipPath = `path("${kind==='pill'?fixedPillPath(w):menuPath(w,h)}")`;
   };
   const observer = new ResizeObserver(update);
   observer.observe(element,{box:'border-box'});
   update();
   return () => observer.disconnect();
 }
-
-if(typeof module !== "undefined") module.exports={menuPath,applePillPath,fixedPillPath,attachGlassShape,MENU_CORNER,PILL_HEIGHT,PILL_MIN_WIDTH};
+if(typeof module !== "undefined") module.exports={menuPath,applePillPath,fixedPillPath,actionButtonPath,dialogPath,glassPath,getGlassPreset,attachGlassShape,MENU_CORNER,GLASS_PRESETS,PILL_HEIGHT,PILL_MIN_WIDTH};
